@@ -1,0 +1,156 @@
+_schema-version: "3.2"
+ID: sacuser
+version: 0.0.1
+modules:
+- name: sacuser-srv
+  type: nodejs
+  path: gen/srv
+  requires:
+  - name: sacuser-uaa
+  - name: sacuser-dest
+  provides:
+  - name: srv-api
+    properties:
+      srv-url: ${default-url}
+  parameters:
+    buildpack: nodejs_buildpack
+    disk-quota: 1024M
+    memory: 512M
+  build-parameters:
+    ignore:
+    - default-*.json
+    - .env
+    - '*node_modules*'
+    - package-lock.json
+- name: sacuser-html5
+  type: html5
+  path: app/html5
+  build-parameters:
+    build-result: dist
+    builder: custom
+    commands:
+    - npm install
+    - npm run build:cf
+    supported-platforms: []
+- name: sacuser-ui-deployer
+  type: com.sap.application.content
+  path: .
+  requires:
+  - name: sacuser-html5repo
+    parameters:
+      content-target: true
+  build-parameters:
+    build-result: gen/app
+    requires:
+    - artifacts:
+      - html5-content.zip
+      name: sacuser-html5
+      target-path: gen/app
+    - artifacts:
+      - usermanagementapp.zip
+      name: usermanagementapp
+      target-path: gen/app/
+- name: sacuser-dest-content
+  type: com.sap.application.content
+  requires:
+  - name: sacuser-uaa
+    parameters:
+      service-key:
+        name: sacuser-uaa-sk
+  - name: sacuser-dest
+    parameters:
+      content-target: true
+  - name: sacuser-html5repo
+    parameters:
+      service-key:
+        name: sacuser-html5repo-sk
+  - name: srv-api
+  parameters:
+    content:
+      instance:
+        destinations:
+        - Authentication: OAuth2UserTokenExchange
+          Name: sacuser-service-sacuser-uaa
+          ServiceInstanceName: sacuser-uaa
+          ServiceKeyName: sacuser-uaa-sk
+          sap.cloud.service: sacuser-service
+        - Name: sacuser-service-sacuser-html5repo
+          ServiceInstanceName: sacuser-html5repo
+          ServiceKeyName: sacuser-html5repo-sk
+          sap.cloud.service: sacuser-service
+        - Authentication: OAuth2UserTokenExchange
+          Description: User Management - Server Module
+          Name: sacuser-srv
+          TokenServiceInstanceName: sacuser-uaa
+          TokenServiceKeyName: sacuser-uaa-sk
+          URL: ~{srv-api/srv-url}
+          sap.cloud.service: sacuser-service
+        existing_destinations_policy: ignore
+  build-parameters:
+    no-source: true
+- name: usermanagementapp
+  type: html5
+  path: app/usermanagementapp
+  build-parameters:
+    build-result: dist
+    builder: custom
+    commands:
+    - npm install
+    - npm run build:cf
+    supported-platforms: []
+resources:
+- name: sacuser-uaa
+  type: org.cloudfoundry.managed-service
+  parameters:
+    path: ./xs-security.json
+    service: xsuaa
+    service-plan: application
+- name: sacuser-dest
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      HTML5Runtime_enabled: true
+      init_data:
+        instance:
+          destinations:
+          - Authentication: OAuth2SAMLBearerAssertion
+            Description: SAP Analytics Cloud Tenant API
+            HTML5.DynamicDestination: true
+            Name: sacuser-sac-tenant-api
+            ProxyType: Internet
+            Type: HTTP
+            URL: https://stmicroelectronics-qa.eu20.hcs.cloud.sap
+            URL.headers.Application-Interface-Key: <SetValueInCockpit>
+            audience: https://stmicroelectronics-qa.authentication.eu20.hana.ondemand.com
+            authnContextClassRef: urn:oasis:names:tc:SAML:2.0:ac:classes:PreviousSession
+            clientKey: <SetValueInCockpit>
+            nameIdFormat: urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress
+            tokenServicePassword: <SetValueInCockpit>
+            tokenServiceURL: https://stmicroelectronics-qa.authentication.eu20.hana.ondemand.com/oauth/token/alias/stmicroelectronics-qa.azure-live-eu20
+            tokenServiceUser: <SetValueInCockpit>
+            userIdSource: email
+          - Authentication: NoAuthentication
+            Description: SAPUI5
+            Name: ui5
+            ProxyType: Internet
+            Type: HTTP
+            URL: https://ui5.sap.com
+          existing_destinations_policy: ignore
+    service: destination
+    service-plan: lite
+  requires:
+  - name: srv-api
+- name: sacuser-html5repo
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: html5-apps-repo
+    service-plan: app-host
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+  - builder: custom
+    commands:
+    - npm install --production
+    - npx -p @sap/cds-dk cds build --production
